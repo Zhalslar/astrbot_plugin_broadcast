@@ -1,29 +1,23 @@
 import asyncio
+import random
 
 from aiocqhttp import CQHttp
-from astrbot.api.star import Context, Star, register
+
+from astrbot.api import logger
+from astrbot.api.event import filter
+from astrbot.api.star import Context, Star
 from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
-from astrbot.api.event import filter
 from astrbot.core.utils.session_waiter import (
-    session_waiter,
     SessionController,
+    session_waiter,
 )
-from astrbot import logger
-import random
 
 
-@register(
-    "astrbot_plugin_broadcast",
-    "Zhalslar",
-    "广播助手，帮助你向所有群聊广播消息(支持任何格式消息)",
-    "v1.0.3",
-    "https://github.com/Zhalslar/astrbot_plugin_broadcast",
-)
-class NobotPlugin(Star):
+class BroadcastPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
