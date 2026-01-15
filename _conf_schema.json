@@ -1,8 +1,25 @@
-{   
+{
+    "broadcast_max_delay": {
+        "description": "广播消息的最大延迟秒数",
+        "hint": "群发消息有风险，插件内采用随机延迟策略，降低风控的风险。此处设置随机延迟的最大值，单位为秒",
+        "type": "float",
+        "slider": {
+            "min": 0.01,
+            "max": 3.0,
+            "step": 0.01
+        },
+        "default": 1.1
+    },
     "disable_gids": {
         "description": "关闭广播的群聊",
         "type": "list",
         "hint": "关闭广播的群聊将不再接收广播消息",
+        "default": []
+    },
+    "unreachable_gids": {
+        "description": "无法广播的群聊",
+        "type": "list",
+        "hint": "无法广播的群聊的群号将被自动添加到此列表，bot不再向列表中的群聊广播消息。(tip: 无法广播的原因通常是被踢了 / 群不存在 / 无权限)",
         "default": []
     }
 }

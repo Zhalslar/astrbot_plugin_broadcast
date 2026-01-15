@@ -1,7 +1,7 @@
 name: astrbot_plugin_broadcast
 display_name: 广播助手
-desc: "[仅aiocqhttp] 帮助你向所有群聊广播消息(支持任何格式消息)"
+desc: "[仅aiocqhttp] 一键群广播，所有适配器支持的格式都能发"
 help: 略
-version: v1.0.4
+version: v1.1.0
 author: Zhalslar
 repo: https://github.com/Zhalslar/astrbot_plugin_broadcast
