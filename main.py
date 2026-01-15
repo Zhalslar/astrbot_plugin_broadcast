@@ -8,8 +8,9 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
 
+from .core.model import BroadcastScope
 from .core.service import BroadcastResult, BroadcastService
-from .core.state import BroadcastGroupState
+from .core.state import BroadcastState
 from .core.utils import get_group_by_index, get_reply_id
 
 
@@ -17,7 +18,7 @@ class BroadcastPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.cfg = config
-        self.state = BroadcastGroupState(config)
+        self.state = BroadcastState(config)
         self._broadcast_task = None
 
     # ========================
@@ -32,7 +33,7 @@ class BroadcastPlugin(Star):
         if not gid:
             return
 
-        if self.state.enable(gid):
+        if self.state.enable("group", gid):
             yield event.plain_result(f"【{name}】已开启广播")
         else:
             yield event.plain_result(f"【{name}】广播已开启")
@@ -45,7 +46,7 @@ class BroadcastPlugin(Star):
         if not gid:
             return
 
-        if self.state.disable(gid):
+        if self.state.disable("group", gid):
             yield event.plain_result(f"【{name}】已关闭广播")
         else:
             yield event.plain_result(f"【{name}】广播已关闭")
@@ -60,16 +61,16 @@ class BroadcastPlugin(Star):
         disabled = []
 
         for idx, g in enumerate(groups, 1):
+            gid = str(g["group_id"])
             info = f"{idx}. {g['group_name']}"
-            if self.state.is_disabled(str(g["group_id"])):
+            if self.state.is_disabled("group", gid):
                 disabled.append(info)
             else:
                 enabled.append(info)
 
-        msg = (
-            "【开启广播】\n" + "\n".join(enabled) + "\n\n"
-            "【关闭广播】\n" + "\n".join(disabled)
-        ).strip()
+        msg = "【开启广播】\n" + "\n".join(enabled)
+        if len(disabled) > 0:
+            msg += "\n\n【关闭广播】\n" + "\n".join(disabled)
 
         yield event.plain_result(msg)
 
@@ -79,8 +80,8 @@ class BroadcastPlugin(Star):
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("广播")
-    async def broadcast(self, event: AiocqhttpMessageEvent):
-        """(引用消息)广播， 广播引用的消息"""
+    async def broadcast(self, event: AiocqhttpMessageEvent, scope_str: str = "群聊"):
+        """(引用消息)广播 <群聊|私聊|全部>"""
         reply_id = get_reply_id(event)
         if not reply_id:
             yield event.plain_result("需要引用要广播的消息")
@@ -92,18 +93,18 @@ class BroadcastPlugin(Star):
             return
 
         try:
-            service = BroadcastService(self.cfg, self.state, bot=event.bot)
-            task = service.create_broadcast_task(reply_id)
-        except RuntimeError as e:
+            scope = BroadcastScope.from_text(scope_str)
+        except ValueError as e:
             yield event.plain_result(str(e))
             return
 
+        service = BroadcastService(self.cfg, self.state, bot=event.bot)
+        task = service.create_broadcast_task(reply_id, scope)
         self._broadcast_task = task
 
-        gids = await service.get_broadcastable_gids()
         chain = [
             Reply(id=reply_id),
-            Plain(f"正在向{len(gids)}个群广播此消息..."),
+            Plain(f"【{scope_str}】正在广播此消息..."),
         ]
         yield event.chain_result(chain)
 
@@ -117,9 +118,9 @@ class BroadcastPlugin(Star):
                 self._broadcast_task = None
 
             msg = (
-                f"广播完成\n"
-                f"成功：{result.success_count}个群\n"
-                f"失败：{result.failed_count}个群\n"
+                f"【{scope_str}】广播完成\n"
+                f"成功：{result.success_count}个\n"
+                f"失败：{result.failed_count}个\n"
                 f"{'（中途取消）' if result.cancelled else ''}"
             ).strip()
 
