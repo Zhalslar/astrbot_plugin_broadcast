@@ -114,7 +114,7 @@ class BroadcastService:
         except asyncio.CancelledError:
             logger.info("广播任务被取消")
             result.cancelled = True
-            raise
+            return result
 
         finally:
             self._task = None
