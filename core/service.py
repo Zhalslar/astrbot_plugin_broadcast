@@ -110,13 +110,15 @@ class BroadcastService:
                 ids = await self._get_targets(t)
 
                 for id_ in ids:
-                    await asyncio.sleep(
-                        random.uniform(0, self.cfg["broadcast_max_delay"])
-                    )
+                    await asyncio.sleep(random.uniform(0, self.cfg["broadcast_max_delay"]))
 
                     try:
                         await self._send_single(t, id_, message_id)
                         result.success_ids.append(f"{t}:{id_}")
+
+                    except asyncio.CancelledError:
+                        # ★ 关键：立即放行取消
+                        raise
 
                     except Exception as e:
                         result.failed_ids.append(f"{t}:{id_}")
