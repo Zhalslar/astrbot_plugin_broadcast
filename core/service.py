@@ -7,7 +7,8 @@ from aiocqhttp import CQHttp
 from astrbot.api import logger
 from astrbot.core.config.astrbot_config import AstrBotConfig
 
-from .state import BroadcastGroupState
+from .model import BroadcastScope
+from .state import BroadcastState, TargetType
 
 # =========================
 # 结果对象
@@ -16,17 +17,17 @@ from .state import BroadcastGroupState
 
 @dataclass(slots=True)
 class BroadcastResult:
-    success_gids: list[str] = field(default_factory=list)
-    failed_gids: list[str] = field(default_factory=list)
+    success_ids: list[str] = field(default_factory=list)
+    failed_ids: list[str] = field(default_factory=list)
     cancelled: bool = False
 
     @property
     def success_count(self) -> int:
-        return len(self.success_gids)
+        return len(self.success_ids)
 
     @property
     def failed_count(self) -> int:
-        return len(self.failed_gids)
+        return len(self.failed_ids)
 
     @property
     def total(self) -> int:
@@ -41,46 +42,54 @@ class BroadcastResult:
 class BroadcastService:
     """
     广播服务（单实例单任务）
-    - 通过 asyncio.Task 管理生命周期
-    - 使用 CancelledError 作为唯一取消语义
     """
 
     def __init__(
         self,
         config: AstrBotConfig,
-        state: BroadcastGroupState,
+        state: BroadcastState,
         bot: CQHttp,
     ):
         self.cfg = config
         self.state = state
         self.bot = bot
-
         self._task: asyncio.Task | None = None
 
     # ========================
-    # 群列表
+    # 目标解析
     # ========================
 
-    async def get_broadcastable_gids(self) -> list[str]:
-        groups = await self.bot.get_group_list()
-        gids = [str(g["group_id"]) for g in groups]
-        return self.state.filter_broadcastable(gids)
+    async def _get_targets(self, t: TargetType) -> list[str]:
+        if t == "group":
+            groups = await self.bot.get_group_list()
+            ids = [str(g["group_id"]) for g in groups]
+        else:
+            friends = await self.bot.get_friend_list()
+            ids = [str(f["user_id"]) for f in friends]
+
+        return self.state.filter_broadcastable(t, ids)
+
+    def _scope_to_targets(self, scope: BroadcastScope) -> list[TargetType]:
+        if scope == BroadcastScope.GROUP:
+            return ["group"]
+        if scope == BroadcastScope.FRIEND:
+            return ["friend"]
+        return ["group", "friend"]
 
     # ========================
     # 对外入口
     # ========================
 
-    def create_broadcast_task(self, message_id: str | int) -> asyncio.Task:
-        """
-        启动广播任务
-        - 同一时间只允许一个广播
-        - 取消请直接对返回的 task 调用 cancel()
-        """
+    def create_broadcast_task(
+        self,
+        message_id: str | int,
+        scope: BroadcastScope,
+    ) -> asyncio.Task:
         if self._task and not self._task.done():
             raise RuntimeError("已有广播任务正在执行")
 
         self._task = asyncio.create_task(
-            self._broadcast_impl(message_id),
+            self._broadcast_impl(message_id, scope),
             name="broadcast_task",
         )
         return self._task
@@ -89,27 +98,32 @@ class BroadcastService:
     # 内部实现
     # ========================
 
-    async def _broadcast_impl(self, message_id: str | int) -> BroadcastResult:
+    async def _broadcast_impl(
+        self,
+        message_id: str | int,
+        scope: BroadcastScope,
+    ) -> BroadcastResult:
         result = BroadcastResult()
 
         try:
-            gids = await self.get_broadcastable_gids()
+            for t in self._scope_to_targets(scope):
+                ids = await self._get_targets(t)
 
-            for gid in gids:
-                # 延迟（可被 CancelledError 中断）
-                await asyncio.sleep(random.uniform(0, self.cfg["broadcast_max_delay"]))
+                for id_ in ids:
+                    await asyncio.sleep(random.uniform(0, self.cfg["broadcast_max_delay"]))
 
-                try:
-                    await self.bot.forward_group_single_msg(
-                        group_id=int(gid),
-                        message_id=message_id,
-                    )
-                    result.success_gids.append(gid)
+                    try:
+                        await self._send_single(t, id_, message_id)
+                        result.success_ids.append(f"{t}:{id_}")
 
-                except Exception as e:
-                    result.failed_gids.append(gid)
-                    self.state.mark_unreachable(gid)
-                    logger.warning(f"群 {gid} 不可达，已标记: {e}")
+                    except asyncio.CancelledError:
+                        # ★ 关键：立即放行取消
+                        raise
+
+                    except Exception as e:
+                        result.failed_ids.append(f"{t}:{id_}")
+                        self.state.mark_unreachable(t, id_)
+                        logger.warning(f"{t} {id_} 广播失败: {e}")
 
         except asyncio.CancelledError:
             logger.info("广播任务被取消")
@@ -120,3 +134,24 @@ class BroadcastService:
             self._task = None
 
         return result
+
+    # ========================
+    # 发送封装
+    # ========================
+
+    async def _send_single(
+        self,
+        t: TargetType,
+        id_: str,
+        message_id: str | int,
+    ) -> None:
+        if t == "group":
+            await self.bot.forward_group_single_msg(
+                group_id=int(id_),
+                message_id=message_id,
+            )
+        else:
+            await self.bot.forward_friend_single_msg(
+                user_id=int(id_),
+                message_id=message_id,
+            )

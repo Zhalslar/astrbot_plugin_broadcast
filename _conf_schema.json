@@ -21,5 +21,17 @@
         "type": "list",
         "hint": "无法广播的群聊的群号将被自动添加到此列表，bot不再向列表中的群聊广播消息。(tip: 无法广播的原因通常是被踢了 / 群不存在 / 无权限)",
         "default": []
+    },
+    "disable_uids": {
+        "description": "关闭私聊广播的好友",
+        "type": "list",
+        "hint": "被禁用的好友将不会收到私聊广播",
+        "default": []
+    },
+    "unreachable_uids": {
+        "description": "无法私聊广播的好友",
+        "type": "list",
+        "hint": "私聊广播失败的好友将被自动加入此列表",
+        "default": []
     }
 }
