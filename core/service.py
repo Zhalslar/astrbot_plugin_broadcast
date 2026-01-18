@@ -53,7 +53,6 @@ class BroadcastService:
         self.cfg = config
         self.state = state
         self.bot = bot
-        self._task: asyncio.Task | None = None
 
     # ========================
     # 目标解析
@@ -76,29 +75,8 @@ class BroadcastService:
             return ["friend"]
         return ["group", "friend"]
 
-    # ========================
-    # 对外入口
-    # ========================
 
-    def create_broadcast_task(
-        self,
-        message_id: str | int,
-        scope: BroadcastScope,
-    ) -> asyncio.Task:
-        if self._task and not self._task.done():
-            raise RuntimeError("已有广播任务正在执行")
-
-        self._task = asyncio.create_task(
-            self._broadcast_impl(message_id, scope),
-            name="broadcast_task",
-        )
-        return self._task
-
-    # ========================
-    # 内部实现
-    # ========================
-
-    async def _broadcast_impl(
+    async def broadcast(
         self,
         message_id: str | int,
         scope: BroadcastScope,
@@ -122,16 +100,11 @@ class BroadcastService:
 
                     except Exception as e:
                         result.failed_ids.append(f"{t}:{id_}")
-                        self.state.mark_unreachable(t, id_)
                         logger.warning(f"{t} {id_} 广播失败: {e}")
 
         except asyncio.CancelledError:
             logger.info("广播任务被取消")
             result.cancelled = True
-            return result
-
-        finally:
-            self._task = None
 
         return result
 
