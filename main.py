@@ -9,7 +9,7 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 )
 
 from .core.model import BroadcastScope
-from .core.service import BroadcastResult, BroadcastService
+from .core.service import BroadcastService
 from .core.state import BroadcastState
 from .core.utils import get_group_by_index, get_reply_id
 
@@ -99,7 +99,10 @@ class BroadcastPlugin(Star):
             return
 
         service = BroadcastService(self.cfg, self.state, bot=event.bot)
-        task = service.create_broadcast_task(reply_id, scope)
+        task = asyncio.create_task(
+            service.broadcast(reply_id, scope),
+            name="broadcast_task",
+        )
         self._broadcast_task = task
 
         chain = [
@@ -111,7 +114,7 @@ class BroadcastPlugin(Star):
         # 后台等待结果并汇报
         async def _wait_result():
             try:
-                result: BroadcastResult = await task
+                result = await task
             except asyncio.CancelledError:
                 return
             finally:
