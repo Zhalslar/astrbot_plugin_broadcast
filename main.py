@@ -107,7 +107,7 @@ class BroadcastPlugin(Star):
 
         chain = [
             Reply(id=reply_id),
-            Plain(f"【{scope_str}】正在广播此消息..."),
+            Plain(f"正在广播此消息...({scope_str})"),
         ]
         yield event.chain_result(chain)
 
@@ -121,9 +121,8 @@ class BroadcastPlugin(Star):
                 self._broadcast_task = None
 
             msg = (
-                f"【{scope_str}】广播完成\n"
-                f"成功：{result.success_count}个\n"
-                f"失败：{result.failed_count}个\n"
+                f"【{scope_str}】广播完成"
+                f"\n成功{result.success_count}个; 失败{result.failed_count}个"
                 f"{'（中途取消）' if result.cancelled else ''}"
             ).strip()
 

@@ -27,7 +27,7 @@ class BroadcastState:
         return id_ in self._disable[t]
 
     def filter_broadcastable(self, t: TargetType, ids: Iterable[str]) -> list[str]:
-        return [i for i in ids if self.is_disabled(t, i)]
+        return [i for i in ids if not self.is_disabled(t, i)]
 
     # =========================
     # 人工策略
