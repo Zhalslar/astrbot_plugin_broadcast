@@ -98,9 +98,17 @@ class BroadcastPlugin(Star):
             yield event.plain_result(str(e))
             return
 
+        source_gid = None
+        try:
+            gid = event.get_group_id()
+            if gid:
+                source_gid = str(gid)
+        except Exception:
+            source_gid = None
+
         service = BroadcastService(self.cfg, self.state, bot=event.bot)
         task = asyncio.create_task(
-            service.broadcast(reply_id, scope),
+            service.broadcast(reply_id, scope, source_group_id=source_gid),
             name="broadcast_task",
         )
         self._broadcast_task = task

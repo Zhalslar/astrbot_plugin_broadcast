@@ -80,12 +80,36 @@ class BroadcastService:
         self,
         message_id: str | int,
         scope: BroadcastScope,
+        source_group_id: str | None = None,
     ) -> BroadcastResult:
         result = BroadcastResult()
 
         try:
+            raw_skip_source_session = self.cfg["skip_source_session"]
+        except Exception:
+            raw_skip_source_session = True
+
+        if isinstance(raw_skip_source_session, str):
+            skip_source_session = raw_skip_source_session.strip().lower() in (
+                "1",
+                "true",
+                "yes",
+                "y",
+                "on",
+            )
+        else:
+            skip_source_session = bool(raw_skip_source_session)
+
+        try:
             for t in self._scope_to_targets(scope):
                 ids = await self._get_targets(t)
+                if (
+                    t == "group"
+                    and skip_source_session
+                    and source_group_id
+                    and source_group_id in ids
+                ):
+                    ids = [i for i in ids if i != source_group_id]
 
                 for id_ in ids:
                     await asyncio.sleep(random.uniform(0, self.cfg["broadcast_max_delay"]))
