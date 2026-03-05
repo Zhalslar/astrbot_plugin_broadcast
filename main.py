@@ -8,22 +8,15 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
 
-from .core.model import BroadcastScope
-from .core.service import BroadcastService
-from .core.state import BroadcastState
-from .core.utils import get_group_by_index, get_reply_id
+from .config import PluginConfig
+from .utils import broadcast, get_group_by_index, get_ids, get_reply_id
 
 
 class BroadcastPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.cfg = config
-        self.state = BroadcastState(config)
+        self.cfg = PluginConfig(config)
         self._broadcast_task = None
-
-    # ========================
-    # 广播开关与列表
-    # ========================
 
     @filter.command("开启广播")
     async def enable_broadcast(
@@ -33,7 +26,7 @@ class BroadcastPlugin(Star):
         if not gid:
             return
 
-        if self.state.enable("group", gid):
+        if self.cfg.enable_target(gid):
             yield event.plain_result(f"【{name}】已开启广播")
         else:
             yield event.plain_result(f"【{name}】广播已开启")
@@ -46,7 +39,7 @@ class BroadcastPlugin(Star):
         if not gid:
             return
 
-        if self.state.disable("group", gid):
+        if self.cfg.disable_target(gid):
             yield event.plain_result(f"【{name}】已关闭广播")
         else:
             yield event.plain_result(f"【{name}】广播已关闭")
@@ -63,7 +56,7 @@ class BroadcastPlugin(Star):
         for idx, g in enumerate(groups, 1):
             gid = str(g["group_id"])
             info = f"{idx}. {g['group_name']}"
-            if self.state.is_disabled("group", gid):
+            if self.cfg.is_disabled(gid):
                 disabled.append(info)
             else:
                 enabled.append(info)
@@ -74,58 +67,57 @@ class BroadcastPlugin(Star):
 
         yield event.plain_result(msg)
 
-    # ========================
-    # 广播流程
-    # ========================
-
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("广播")
-    async def broadcast(self, event: AiocqhttpMessageEvent, scope_str: str = "群聊"):
+    async def cmd_broadcast(self, event: AiocqhttpMessageEvent, scope_str: str = ""):
         """(引用消息)广播 <群聊|私聊|全部>"""
         reply_id = get_reply_id(event)
         if not reply_id:
             yield event.plain_result("需要引用要广播的消息")
             return
 
-        # 防止重复广播
         if self._broadcast_task and not self._broadcast_task.done():
             yield event.plain_result("已有广播正在进行中")
             return
 
-        try:
-            scope = BroadcastScope.from_text(scope_str)
-        except ValueError as e:
-            yield event.plain_result(str(e))
-            return
+        is_group = True if scope_str in ("好友", "私聊", "f", "friend") else True
+        scope_str = "群聊" if is_group else "私聊"
 
-        service = BroadcastService(self.cfg, self.state, bot=event.bot)
+        ids = await get_ids(client=event.bot, is_group=is_group)
+
+        if self.cfg.skip_source:
+            source_id = event.get_group_id() if is_group else event.get_sender_id()
+            if source_id in ids:
+                ids.remove(source_id)
+
         task = asyncio.create_task(
-            service.broadcast(reply_id, scope),
+            broadcast(
+                client=event.bot,
+                is_group=is_group,
+                message_id=reply_id,
+                ids=ids,
+                delay=self.cfg.get_broadcast_delay(),
+            ),
             name="broadcast_task",
         )
         self._broadcast_task = task
 
         chain = [
             Reply(id=reply_id),
-            Plain(f"正在广播此消息...({scope_str})"),
+            Plain(f"正在向{len(ids)}个{scope_str}广播此消息..."),
         ]
         yield event.chain_result(chain)
 
         # 后台等待结果并汇报
         async def _wait_result():
             try:
-                result = await task
+                success_ids = await task
             except asyncio.CancelledError:
                 return
             finally:
                 self._broadcast_task = None
 
-            msg = (
-                f"【{scope_str}】广播完成"
-                f"\n成功{result.success_count}个; 失败{result.failed_count}个"
-                f"{'（中途取消）' if result.cancelled else ''}"
-            ).strip()
-
+            msg = f"已向{len(success_ids)}个{scope_str}广播此消息"
             await event.send(event.plain_result(msg))
 
         asyncio.create_task(_wait_result())
