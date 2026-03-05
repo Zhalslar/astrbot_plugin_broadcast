@@ -8,124 +8,164 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
 )
 
-from .core.model import BroadcastScope
-from .core.service import BroadcastService
-from .core.state import BroadcastState
-from .core.utils import get_group_by_index, get_reply_id
+from .config import PluginConfig
+from .utils import (
+    broadcast,
+    get_friend_by_index,
+    get_group_by_index,
+    get_ids,
+    get_reply_id,
+    parse_scope_and_index,
+    parse_scope_name,
+)
 
 
 class BroadcastPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.cfg = config
-        self.state = BroadcastState(config)
+        self.cfg = PluginConfig(config)
         self._broadcast_task = None
-
-    # ========================
-    # 广播开关与列表
-    # ========================
 
     @filter.command("开启广播")
     async def enable_broadcast(
-        self, event: AiocqhttpMessageEvent, index: int | None = None
+        self,
+        event: AiocqhttpMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
     ):
-        gid, name = await get_group_by_index(event, index)
-        if not gid:
+        """开启广播 <留空|群聊|私聊> <序号>"""
+        is_group, index, err = parse_scope_and_index(arg1, arg2)
+        if err:
+            yield event.plain_result(err)
             return
 
-        if self.state.enable("group", gid):
-            yield event.plain_result(f"【{name}】已开启广播")
+        if is_group:
+            target_id, name = await get_group_by_index(event, index)
         else:
-            yield event.plain_result(f"【{name}】广播已开启")
+            target_id, name = await get_friend_by_index(event, index)
+        if not target_id:
+            return
+
+        self.cfg.enable_target(target_id, is_group=is_group)
+        scope_name = "群聊" if is_group else "私聊"
+        yield event.plain_result(f"【{name}】已开启{scope_name}广播")
 
     @filter.command("关闭广播")
     async def disable_broadcast(
-        self, event: AiocqhttpMessageEvent, index: int | None = None
+        self,
+        event: AiocqhttpMessageEvent,
+        arg1: str = "",
+        arg2: str = "",
     ):
-        gid, name = await get_group_by_index(event, index)
-        if not gid:
+        """关闭广播 <留空|群聊|私聊> <序号>"""
+        is_group, index, err = parse_scope_and_index(arg1, arg2)
+        scope_text = "群聊" if is_group else "好友"
+
+        if err:
+            yield event.plain_result(err)
             return
 
-        if self.state.disable("group", gid):
-            yield event.plain_result(f"【{name}】已关闭广播")
+        if is_group:
+            target_id, name = await get_group_by_index(event, index)
         else:
-            yield event.plain_result(f"【{name}】广播已关闭")
+            target_id, name = await get_friend_by_index(event, index)
+        if not target_id:
+            return
+
+        self.cfg.disable_target(target_id, is_group=is_group)
+        yield event.plain_result(f"已关闭【{name}】的{scope_text}广播")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("广播列表")
-    async def broadcast_list(self, event: AiocqhttpMessageEvent):
-        groups = await event.bot.get_group_list()
-        groups.sort(key=lambda x: x["group_id"])
+    async def broadcast_list(self, event: AiocqhttpMessageEvent, scope_name: str = ""):
+        """广播列表 <留空|群聊|私聊>"""
+        is_group = bool(parse_scope_name(scope_name))
+        scope_text = "群聊" if is_group else "好友"
 
         enabled = []
         disabled = []
 
-        for idx, g in enumerate(groups, 1):
-            gid = str(g["group_id"])
-            info = f"{idx}. {g['group_name']}"
-            if self.state.is_disabled("group", gid):
-                disabled.append(info)
-            else:
-                enabled.append(info)
+        if is_group:
+            groups = await event.bot.get_group_list()
+            groups.sort(key=lambda x: x["group_id"])
+            for idx, g in enumerate(groups, 1):
+                target_id = str(g["group_id"])
+                info = f"{idx}. {g['group_name']} ({target_id})"
+                if self.cfg.is_disabled(target_id, is_group=True):
+                    disabled.append(info)
+                else:
+                    enabled.append(info)
+        else:
+            friends = await event.bot.get_friend_list()
+            friends.sort(key=lambda x: x["user_id"])
+            for idx, f in enumerate(friends, 1):
+                target_id = str(f["user_id"])
+                name = f.get("remark") or f.get("nickname") or target_id
+                info = f"{idx}. {name} ({target_id})"
+                if self.cfg.is_disabled(target_id, is_group=False):
+                    disabled.append(info)
+                else:
+                    enabled.append(info)
 
-        msg = "【开启广播】\n" + "\n".join(enabled)
+        msg = f"【{scope_text}开启广播】\n" + "\n".join(enabled)
         if len(disabled) > 0:
-            msg += "\n\n【关闭广播】\n" + "\n".join(disabled)
+            msg += f"\n\n【{scope_text}关闭广播】\n" + "\n".join(disabled)
 
         yield event.plain_result(msg)
 
-    # ========================
-    # 广播流程
-    # ========================
-
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("广播")
-    async def broadcast(self, event: AiocqhttpMessageEvent, scope_str: str = "群聊"):
+    async def cmd_broadcast(self, event: AiocqhttpMessageEvent, scope_name: str = ""):
         """(引用消息)广播 <群聊|私聊|全部>"""
         reply_id = get_reply_id(event)
         if not reply_id:
             yield event.plain_result("需要引用要广播的消息")
             return
 
-        # 防止重复广播
         if self._broadcast_task and not self._broadcast_task.done():
             yield event.plain_result("已有广播正在进行中")
             return
 
-        try:
-            scope = BroadcastScope.from_text(scope_str)
-        except ValueError as e:
-            yield event.plain_result(str(e))
-            return
+        is_group = bool(parse_scope_name(scope_name))
+        scope_text = "群聊" if is_group else "好友"
 
-        service = BroadcastService(self.cfg, self.state, bot=event.bot)
+        ids = await get_ids(client=event.bot, is_group=is_group)
+
+        if self.cfg.skip_source:
+            source_id = str(event.get_group_id() if is_group else event.get_sender_id())
+            if source_id in ids:
+                ids.remove(source_id)
+
+        filter_ids = self.cfg.filter_broadcastable(ids, is_group=is_group)
+
         task = asyncio.create_task(
-            service.broadcast(reply_id, scope),
+            broadcast(
+                client=event.bot,
+                is_group=is_group,
+                message_id=reply_id,
+                ids=filter_ids,
+                delay=self.cfg.get_broadcast_delay(),
+            ),
             name="broadcast_task",
         )
         self._broadcast_task = task
 
         chain = [
             Reply(id=reply_id),
-            Plain(f"正在广播此消息...({scope_str})"),
+            Plain(f"正在向{len(filter_ids)}个{scope_text}广播此消息..."),
         ]
         yield event.chain_result(chain)
 
         # 后台等待结果并汇报
         async def _wait_result():
             try:
-                result = await task
+                success_ids = await task
             except asyncio.CancelledError:
                 return
             finally:
                 self._broadcast_task = None
 
-            msg = (
-                f"【{scope_str}】广播完成"
-                f"\n成功{result.success_count}个; 失败{result.failed_count}个"
-                f"{'（中途取消）' if result.cancelled else ''}"
-            ).strip()
-
+            msg = f"已向{len(success_ids)}个{scope_text}广播此消息"
             await event.send(event.plain_result(msg))
 
         asyncio.create_task(_wait_result())
