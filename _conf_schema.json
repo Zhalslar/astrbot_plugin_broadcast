@@ -13,7 +13,7 @@
     "skip_source": {
         "description": "是否跳过广播源头",
         "type": "bool",
-        "hint": "当在群聊中发送广播命令时，是否跳过当前群聊，避免在源头会话重复发送广播消息",
+        "hint": "发送广播命令时，是否跳过当前群聊/私聊，避免在源头会话重复发送广播消息",
         "default": true
     },
     "disable_gids": {
