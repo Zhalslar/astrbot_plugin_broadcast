@@ -80,7 +80,7 @@ class BroadcastPlugin(Star):
             yield event.plain_result("已有广播正在进行中")
             return
 
-        is_group = True if scope_str in ("好友", "私聊", "f", "friend") else True
+        is_group = True if scope_str in ("好友", "私聊", "f", "friend") else False
         scope_str = "群聊" if is_group else "私聊"
 
         ids = await get_ids(client=event.bot, is_group=is_group)

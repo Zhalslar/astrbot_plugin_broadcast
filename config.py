@@ -87,7 +87,7 @@ class ConfigNode:
 
 
 class PluginConfig(ConfigNode):
-    broadcast_max_delay: bool
+    broadcast_max_delay: float
     skip_source: bool
     disable_gids: list[str]
     disable_uids: list[str]
@@ -102,7 +102,7 @@ class PluginConfig(ConfigNode):
     def disabled_list(self, is_group: bool = True) -> list[str]:
         if is_group:
             return self.disable_gids
-        return self.disable_gids
+        return self.disable_uids
 
     def is_disabled(self, target_id: str, is_group: bool = True) -> bool:
         return target_id in self.disabled_list(is_group)
